@@ -137,7 +137,7 @@ pub struct PacketDecoder {
 }
 
 impl PacketDecoder {
-    pub fn decode(read: &mut impl Read) -> Option<PacketDecoder> {
+    pub fn decode(read: &mut impl Read) -> Result<PacketDecoder, std::io::Error> {
         let size = read_varint(read)? as usize;
         let mut data = vec![0; size];
         read.read_exact(&mut data).unwrap();
@@ -147,7 +147,7 @@ impl PacketDecoder {
             packet_id: 0
         };
         decoder.packet_id = decoder.read_varint();
-        return Some(decoder);
+        return Ok(decoder);
     }
 
     pub fn packet_id(&self) -> i32 {
@@ -264,12 +264,12 @@ impl PacketDecoder {
     }
 }
 
-fn read_varint(read: &mut impl Read) -> Option<i32> {
+fn read_varint(read: &mut impl Read) -> Result<i32, std::io::Error> {
     let mut result = 0;
     let mut count = 0;
     loop {
         let mut byte = [0];
-        read.read_exact(&mut byte).ok()?;
+        read.read_exact(&mut byte)?;
         let byte = byte[0];
         result |= ((byte & 0x7f) as i32) << (7 * count);
         count += 1;
@@ -280,5 +280,5 @@ fn read_varint(read: &mut impl Read) -> Option<i32> {
             break
         }
     }
-    Some(result)
+    Ok(result)
 }
