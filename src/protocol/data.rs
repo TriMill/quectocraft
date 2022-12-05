@@ -136,6 +136,7 @@ pub struct PacketDecoder {
     packet_id: i32,
 }
 
+#[allow(unused)]
 impl PacketDecoder {
     pub fn decode(read: &mut impl Read) -> Result<PacketDecoder, std::io::Error> {
         let size = read_varint(read)? as usize;

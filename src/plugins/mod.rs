@@ -1,7 +1,7 @@
-use std::{path::Path, fs::{self, read_dir}};
+use std::fs::read_dir;
 
-use log::warn;
-use mlua::{Lua, Table, chunk, LuaSerdeExt};
+use log::{warn, info};
+use mlua::{Lua, Table, LuaSerdeExt};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -9,7 +9,20 @@ use crate::network::Player;
 
 use self::plugin::Plugin;
 
+mod init_lua;
 mod plugin;
+
+#[derive(Serialize, Deserialize)]
+#[serde(tag="type")]
+pub enum Response {
+    #[serde(rename = "message")]
+    Message { player: String, message: serde_json::Value },
+    #[serde(rename = "broadcast")]
+    Broadcast { message: serde_json::Value },
+    #[serde(rename = "disconnect")]
+    Disconnect { player: String, reason: serde_json::Value },
+}
+
 
 pub struct Plugins<'lua> {
     lua: &'lua Lua,
@@ -18,47 +31,7 @@ pub struct Plugins<'lua> {
 
 impl <'lua> Plugins<'lua> {
     pub fn new(lua: &'lua Lua) -> Result<Self, mlua::Error> {
-        lua.load(chunk!{
-            server = { players = {} }
-            _qc = { responses = {} }
-            function server.sendMessage(player, message)
-                if type(player) ~= "string" then
-                    error("player must be a string")
-                end
-                if type(message) == "table" then
-                    table.insert(_qc.responses, {type = "message", player = player, message = message})
-                elseif type(message) == "string" then
-                    table.insert(_qc.responses, {type = "message", player = player, message = { text = message}})
-                else
-                    error("message must be a string or table")                    
-                end
-            end
-            function server.broadcast(message)
-                if type(message) == "table" then
-                    table.insert(_qc.responses, { type = "broadcast", message = message })
-                elseif type(message) == "string" then
-                    table.insert(_qc.responses, { type = "broadcast", message = { text = message } })
-                else
-                    error("message must be a string or table")                    
-                end
-            end
-            function server.initLogger(plugin)
-                local function log_for(level)
-                    return function(message) 
-                        table.insert(_qc.responses, { 
-                            type = "log", origin = plugin.id, message = message, level = level
-                        }) 
-                    end
-                end
-                return {
-                    trace = log_for(0),
-                    debug = log_for(1),
-                    info = log_for(2),
-                    warn = log_for(3),
-                    error = log_for(4),
-                }
-            end
-        }).exec()?;
+        init_lua::init(lua)?;
         Ok(Self { 
             lua, 
             plugins: Vec::new(),
@@ -78,18 +51,15 @@ impl <'lua> Plugins<'lua> {
             };
             let pl = Plugin::load(&path, &self.lua).expect("error loading plugin");
             self.plugins.push(pl);
+            info!("Loaded plugin '{}'", file.file_name().to_string_lossy());
         }
-    }
-
-    pub fn count(&self) -> usize {
-        self.plugins.len()
     }
 
     pub fn get_responses(&self) -> Vec<Response> {
         match self.get_responses_inner() {
             Ok(x) => x,
             Err(e) => {
-                warn!("error getting responses: {}", e);
+                warn!("Error getting responses: {}", e);
                 Vec::new()
             }
         }
@@ -163,15 +133,4 @@ impl <'lua> Plugins<'lua> {
             }
         }
     }
-}
-
-#[derive(Serialize, Deserialize)]
-#[serde(tag="type")]
-pub enum Response {
-    #[serde(rename = "log")]
-    Log { level: i32, origin: String, message: String },
-    #[serde(rename = "message")]
-    Message { player: String, message: serde_json::Value },
-    #[serde(rename = "broadcast")]
-    Broadcast { message: serde_json::Value },
 }

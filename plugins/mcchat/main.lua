@@ -1,6 +1,6 @@
 local plugin = {
-    id = "chat",
-    name = "Chat",
+    id = "mcchat",
+    name = "MCChat",
     description = "Provides Minecraft-style chat. Messages sent by one client will be broadcasted to every client.",
     authors = { "trimill" },
     version = "0.1.0",
@@ -10,7 +10,7 @@ local logger = nil
 
 function plugin.init()
     logger = server.initLogger(plugin)
-    logger.info("Loaded chat")
+    logger.info("MCChat version " .. plugin.version)
 end
 
 function plugin.playerJoin(name)

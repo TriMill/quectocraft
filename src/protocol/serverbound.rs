@@ -31,7 +31,7 @@ pub struct SigData {
 pub struct LoginStart {
     pub name: String,
     pub sig_data: Option<SigData>,
-    pub uuid: Option<Uuid>,
+    pub uuid: Uuid,
 }
 
 impl LoginStart {
@@ -49,11 +49,10 @@ impl LoginStart {
             None
         };
         let has_uuid = decoder.read_bool();
-        let uuid = if has_uuid {
-            Some(decoder.read_uuid())
-        } else {
-            None
-        };
+        if !has_uuid {
+            panic!("Client didn't supply UUID");
+        }
+        let uuid = decoder.read_uuid();
         Self { name, sig_data, uuid }
     }
 }

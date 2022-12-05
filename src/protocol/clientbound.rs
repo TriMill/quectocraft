@@ -135,6 +135,7 @@ impl ChunkData {
     }
 }
 
+#[allow(unused)]
 #[derive(Debug)]
 pub enum ClientBoundPacket {
     // status
@@ -142,6 +143,7 @@ pub enum ClientBoundPacket {
     PingResponse(i64),
     // login
     LoginSuccess(LoginSuccess),
+    LoginDisconnect(serde_json::Value),
     // play
     LoginPlay(LoginPlay),
     PluginMessage(PluginMessage),
@@ -149,6 +151,7 @@ pub enum ClientBoundPacket {
     ChunkData(ChunkData),
     KeepAlive(i64),
     PlayerAbilities(i8, f32, f32),
+    Disconnect(serde_json::Value),
     SystemChatMessage(serde_json::Value, bool),
 }
 
@@ -156,6 +159,7 @@ impl ClientBoundPacket {
     pub fn encode(self) -> Vec<u8> {
         let mut packet = Vec::new();
         match self {
+            // Status
             Self::StatusResponse(status) => {
                 packet.write_string(32767, &status);
                 finalize_packet(packet, 0)
@@ -164,9 +168,23 @@ impl ClientBoundPacket {
                 packet.write_long(n);
                 finalize_packet(packet, 1)
             },
+            // Login
+            Self::LoginDisconnect(message) => {
+                packet.write_string(262144, &message.to_string());
+                finalize_packet(packet, 0)
+            }
             Self::LoginSuccess(login_success) => {
                 login_success.encode(&mut packet);
                 finalize_packet(packet, 2)
+            }
+            // Play
+            Self::Disconnect(message) => {
+                packet.write_string(262144, &message.to_string());
+                finalize_packet(packet, 25)
+            }
+            Self::LoginPlay(login_play) => {
+                login_play.encode(&mut packet);
+                finalize_packet(packet, 37)
             }
             Self::PluginMessage(plugin_message) => {
                 plugin_message.encode(&mut packet);
@@ -175,10 +193,6 @@ impl ClientBoundPacket {
             Self::SyncPlayerPosition(sync_player_position) => {
                 sync_player_position.encode(&mut packet);
                 finalize_packet(packet, 57)
-            }
-            Self::LoginPlay(login_play) => {
-                login_play.encode(&mut packet);
-                finalize_packet(packet, 37)
             }
             Self::ChunkData(chunk_data) => {
                 chunk_data.encode(&mut packet);

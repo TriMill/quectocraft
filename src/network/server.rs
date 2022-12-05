@@ -1,6 +1,7 @@
 use std::{net::TcpListener, thread, sync::mpsc::{Receiver, Sender, channel}, collections::HashSet};
 
-use log::{info, warn, trace, debug, error};
+use log::{info, warn, debug};
+use serde_json::json;
 
 use crate::{protocol::{data::PacketEncoder, serverbound::*, clientbound::*}, plugins::{Plugins, Response}, VERSION};
 
@@ -15,7 +16,7 @@ pub struct NetworkServer<'lua> {
 impl <'lua> NetworkServer<'lua> {
     pub fn new(addr: String, plugins: Plugins<'lua>) -> Self {
         let (send, recv) = channel();
-        info!("initializing plugins");
+        info!("Initializing plugins");
         plugins.init();
         thread::spawn(move || Self::listen(&addr, send));
         Self { 
@@ -26,11 +27,11 @@ impl <'lua> NetworkServer<'lua> {
     }
 
     fn listen(addr: &str, send_clients: Sender<NetworkClient>) {
-        info!("listening on {}", addr);
+        info!("Listening on {}", addr);
         let listener = TcpListener::bind(addr).unwrap();
         for (id, stream) in listener.incoming().enumerate() {
             let stream = stream.unwrap();
-            info!("connection from {} (id {})", stream.peer_addr().unwrap(), id);
+            debug!("Connection from {} (id {})", stream.peer_addr().unwrap(), id);
             let stream_2 = stream.try_clone().unwrap();
             let (send, recv) = channel();
             thread::spawn(|| NetworkClient::listen(stream_2, send));
@@ -97,16 +98,6 @@ impl <'lua> NetworkServer<'lua> {
 
     fn handle_plugin_response(&mut self, response: Response) -> std::io::Result<()> {
         match response {
-            Response::Log { level, origin, message } => {
-                match level {
-                    0 => trace!(target: &origin, "{}", message),
-                    1 => debug!(target: &origin, "{}", message),
-                    2 => info!(target: &origin, "{}", message),
-                    3 => warn!(target: &origin, "{}", message),
-                    4 => error!(target: &origin, "{}", message),
-                    _ => warn!("unknown log level: {}", level)
-                }
-            },
             Response::Message { player, message } => {
                 for client in self.clients.iter_mut() {
                     if let Some(p) = &client.player {
@@ -124,6 +115,15 @@ impl <'lua> NetworkServer<'lua> {
                     }
                 }
             },
+            Response::Disconnect { player, reason } => {
+                for client in self.clients.iter_mut() {
+                    if let Some(pl) = &client.player {
+                        if pl.name == player || pl.uuid.to_string() == player {
+                            client.send_packet(ClientBoundPacket::Disconnect(reason.clone()))?;
+                        }
+                    }
+                }
+            }
         }
         Ok(())
     }
@@ -131,7 +131,7 @@ impl <'lua> NetworkServer<'lua> {
     fn handle_packet(&mut self, client: &mut NetworkClient, packet: ServerBoundPacket) -> std::io::Result<()> {
         match packet {
             ServerBoundPacket::Ignored(_) => (),
-            ServerBoundPacket::Unknown(id) => warn!("unknown: {}", id),
+            ServerBoundPacket::Unknown(id) => warn!("Unknown packet: {}", id),
             ServerBoundPacket::Handshake(_) => (),
             ServerBoundPacket::StatusRequest() 
                 => client.send_packet(ClientBoundPacket::StatusResponse(
@@ -142,17 +142,22 @@ impl <'lua> NetworkServer<'lua> {
                 client.close();
             }
             ServerBoundPacket::LoginStart(login_start) => {
-                client.player = Some(Player {
-                    name: login_start.name.clone(),
-                    uuid: login_start.uuid.unwrap(),
-                });
-                client.play = true;
-                client.send_packet(ClientBoundPacket::LoginSuccess(LoginSuccess {
-                    name: login_start.name,
-                    uuid: login_start.uuid.unwrap(),
-                }))?;
-                self.plugins.player_join(client.player.as_ref().unwrap());
-                self.post_login(client)?;
+                if self.clients.iter().filter_map(|x| x.player.as_ref()).any(|x| x.uuid == login_start.uuid) {
+                    client.send_packet(ClientBoundPacket::LoginDisconnect(json!({"translate": "multiplayer.disconnect.duplicate_login"})))?;
+                    client.close();
+                } else {
+                    client.player = Some(Player {
+                        name: login_start.name.clone(),
+                        uuid: login_start.uuid,
+                    });
+                    client.play = true;
+                    client.send_packet(ClientBoundPacket::LoginSuccess(LoginSuccess {
+                        name: login_start.name,
+                        uuid: login_start.uuid,
+                    }))?;
+                    self.plugins.player_join(client.player.as_ref().unwrap());
+                    self.post_login(client)?;
+                }
             }
             ServerBoundPacket::ChatMessage(msg) => {
                 self.plugins.chat_message(client.player.as_ref().unwrap(), &msg.message);
@@ -187,11 +192,10 @@ impl <'lua> NetworkServer<'lua> {
             channel: "minecraft:brand".to_owned(),
             data: {
                 let mut data = Vec::new();
-                data.write_string(32767, &format!("quectocraft {}", VERSION));
+                data.write_string(32767, &format!("Quectocraft {}", VERSION));
                 data
             }
         }))?;
-        client.send_packet(ClientBoundPacket::PlayerAbilities(0x0d, 0.05, 0.1))?;
         let mut chunk_data: Vec<u8> = Vec::new();
         for _ in 0..(384 / 16) {
             // number of non-air blocks
@@ -224,6 +228,8 @@ impl <'lua> NetworkServer<'lua> {
             teleport_id: 0,
             dismount: false
         }))?;
+        // TODO why doesn't this work with quilt?
+        // client.send_packet(ClientBoundPacket::PlayerAbilities(0x0f, 0.05, 0.1))?;
         Ok(())
     }
 

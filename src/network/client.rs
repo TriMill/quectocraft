@@ -1,6 +1,6 @@
 use std::{net::{TcpStream, Shutdown}, thread, io::Write, sync::mpsc::{Receiver, Sender, TryRecvError}, time::Duration};
 
-use log::info;
+use log::debug;
 
 use crate::{protocol::{data::{PacketDecoder}, serverbound::*, clientbound::*, NetworkState}};
 
@@ -49,7 +49,7 @@ impl NetworkClient {
     }
 
     pub fn close(&mut self) {
-        info!("closed connection id {}", self.id);
+        debug!("Closed connection id {}", self.id);
         let _ = self.stream.shutdown(Shutdown::Both);
         self.closed = true;
     }
