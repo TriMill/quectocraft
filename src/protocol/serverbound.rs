@@ -85,6 +85,7 @@ pub enum ServerBoundPacket {
     LoginStart(LoginStart),
     // play
     ChatMessage(ChatMessage),
+    ChatCommand(ChatMessage),
 }
 
 impl ServerBoundPacket {
@@ -108,6 +109,7 @@ impl ServerBoundPacket {
                 *state = NS::Play;
                 ServerBoundPacket::LoginStart(LoginStart::decode(decoder))
             },
+            (NS::Play, 4) => ServerBoundPacket::ChatCommand(ChatMessage::decode(decoder)),
             (NS::Play, 5) => ServerBoundPacket::ChatMessage(ChatMessage::decode(decoder)),
             (NS::Play, id @ (18 | 20 | 21 | 22 | 30)) => ServerBoundPacket::Ignored(id),
             (_, id) => ServerBoundPacket::Unknown(id),

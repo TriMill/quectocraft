@@ -1,4 +1,5 @@
 use std::borrow::Cow;
+use std::net::SocketAddr;
 use std::time::Duration;
 use std::io::Write;
 
@@ -9,11 +10,14 @@ use mlua::Lua;
 use network::NetworkServer;
 use plugins::Plugins;
 
+use crate::config::load_config;
+
+mod config;
 mod plugins;
 mod protocol;
 mod network;
 
-pub const VERSION: &'static str = std::env!("CARGO_PKG_VERSION");
+pub const VERSION: &str = std::env!("CARGO_PKG_VERSION");
 
 fn main() {
     env_logger::Builder::from_env(
@@ -37,6 +41,8 @@ fn main() {
         writeln!(buf, "\x1b[90m[\x1b[37m{} {color}{}\x1b[37m {}\x1b[90m]\x1b[0m {}", now, record.level(), target, record.args())
     }).init();
 
+    let config = load_config().expect("Failed to load config");
+    let addr = SocketAddr::new(config.addr, config.port);
 
     info!("Starting Quectocraft version {}", VERSION);
 
@@ -45,7 +51,7 @@ fn main() {
     std::fs::create_dir_all("plugins").expect("Couldn't create the plugins directory");
     plugins.load_plugins();
     
-    let mut server = NetworkServer::new("127.0.0.1:25565".to_owned(), plugins);
+    let mut server = NetworkServer::new(addr, plugins);
     let sleep_dur = Duration::from_millis(5);
     let mut i = 0;
     loop {

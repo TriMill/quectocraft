@@ -4,9 +4,11 @@ use mlua::{Function, Table, Lua};
 
 pub struct EventHandlers<'lua> {
     pub init: Option<Function<'lua>>,
+    pub register_commands: Option<Function<'lua>>,
     pub player_join: Option<Function<'lua>>,
     pub player_leave: Option<Function<'lua>>,
     pub chat_message: Option<Function<'lua>>,
+    pub command: Option<Function<'lua>>,
 }   
 
 pub struct Plugin<'lua> {
@@ -26,11 +28,13 @@ impl <'lua> Plugin<'lua> {
         let version: String = module.get("version").unwrap_or_else(|_| "?".to_owned());
 
         let init: Option<Function<'lua>> = module.get("init").ok();
+        let register_commands: Option<Function<'lua>> = module.get("registerCommands").ok();
         let player_join: Option<Function<'lua>> = module.get("playerJoin").ok();
         let player_leave: Option<Function<'lua>> = module.get("playerLeave").ok();
         let chat_message: Option<Function<'lua>> = module.get("chatMessage").ok();
+        let command: Option<Function<'lua>> = module.get("command").ok();
 
-        let event_handlers = EventHandlers { init, player_join, player_leave, chat_message };
+        let event_handlers = EventHandlers { init, register_commands, player_join, player_leave, chat_message, command };
         Ok(Plugin { id, name, version, event_handlers })
     }
 }

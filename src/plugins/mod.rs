@@ -1,11 +1,11 @@
-use std::fs::read_dir;
+use std::{fs::read_dir, rc::Rc, cell::RefCell, collections::HashMap};
 
 use log::{warn, info};
 use mlua::{Lua, Table, LuaSerdeExt};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::network::Player;
+use crate::{network::Player, protocol::command::Commands};
 
 use self::plugin::Plugin;
 
@@ -26,7 +26,8 @@ pub enum Response {
 
 pub struct Plugins<'lua> {
     lua: &'lua Lua,
-    plugins: Vec<Plugin<'lua>>
+    plugins: Vec<Plugin<'lua>>,
+    cmd_owners: HashMap<String, usize>,
 }
 
 impl <'lua> Plugins<'lua> {
@@ -35,6 +36,7 @@ impl <'lua> Plugins<'lua> {
         Ok(Self { 
             lua, 
             plugins: Vec::new(),
+            cmd_owners: HashMap::new(),
         })
     }
 
@@ -49,7 +51,7 @@ impl <'lua> Plugins<'lua> {
             } else {
                 file.path()
             };
-            let pl = Plugin::load(&path, &self.lua).expect("error loading plugin");
+            let pl = Plugin::load(&path, self.lua).expect("error loading plugin");
             self.plugins.push(pl);
             info!("Loaded plugin '{}'", file.file_name().to_string_lossy());
         }
@@ -80,6 +82,38 @@ impl <'lua> Plugins<'lua> {
                 }
             }
         }
+    }
+
+    pub fn register_commands(&mut self, commands: Commands) -> Result<Commands, mlua::Error> {
+        let commands = Rc::new(RefCell::new(commands));
+        let cmd_owners = Rc::new(RefCell::new(HashMap::new()));
+        for (i, pl) in self.plugins.iter().enumerate() {
+            let commands_2 = commands.clone();
+            let cmd_owners_2 = cmd_owners.clone();
+            let pl_id = pl.id.clone();
+            let add_command = self.lua.create_function(move |_, name: String| {
+                let scoped_name = format!("{}:{}", pl_id, name);
+                let mut cmds = commands_2.borrow_mut();
+                let id1 = cmds.create_simple_cmd(&name);
+                let id2 = cmds.create_simple_cmd(&scoped_name);
+                if id1.is_none() || id2.is_none() { 
+                    return Ok(mlua::Nil)
+                }
+                cmd_owners_2.borrow_mut().insert(name, i);
+                cmd_owners_2.borrow_mut().insert(scoped_name, i);
+                Ok(mlua::Nil)
+            })?;
+            let registry = self.lua.create_table()?;
+            registry.set("addCommand", add_command)?;
+            if let Some(init) = &pl.event_handlers.register_commands {
+                if let Err(e) = init.call::<_, ()>((registry.clone(),)) {
+                    warn!("Error in plugin {}: {}", pl.name, e);
+                }
+            }
+        }
+        let cb = commands.borrow();
+        self.cmd_owners = (*cmd_owners.borrow()).clone();
+        Ok((*cb).clone())
     }
 
     pub fn player_join(&self, player: &Player) {
@@ -130,6 +164,19 @@ impl <'lua> Plugins<'lua> {
                 if let Err(e) = func.call::<_, ()>((message, player.name.as_str(), player.uuid.to_string())) {
                     warn!("Error in plugin {}: {}", pl.name, e);
                 }
+            }
+        }
+    }
+
+    pub fn command(&self, player: &Player, command: &str, args: &str) {
+        if let Some(owner) = self.cmd_owners.get(command) {
+            let pl = &self.plugins[*owner];
+            if let Some(func) = &pl.event_handlers.command {
+                if let Err(e) = func.call::<_, ()>((command, args, player.name.as_str(), player.uuid.to_string())) {
+                    warn!("Error in plugin {}: {}", pl.name, e);
+                }
+            } else {
+                warn!("Plugin {} registered a command but no command handler was found", pl.id);
             }
         }
     }

@@ -1,6 +1,6 @@
 use uuid::Uuid;
 
-use super::{data::{PacketEncoder, finalize_packet}, Position};
+use super::{data::{PacketEncoder, finalize_packet}, Position, command::Commands};
 
 #[derive(Debug)]
 pub struct LoginSuccess {
@@ -147,8 +147,9 @@ pub enum ClientBoundPacket {
     // play
     LoginPlay(LoginPlay),
     PluginMessage(PluginMessage),
-    SyncPlayerPosition(SyncPlayerPosition),
+    Commands(Commands),
     ChunkData(ChunkData),
+    SyncPlayerPosition(SyncPlayerPosition),
     KeepAlive(i64),
     PlayerAbilities(i8, f32, f32),
     Disconnect(serde_json::Value),
@@ -190,13 +191,17 @@ impl ClientBoundPacket {
                 plugin_message.encode(&mut packet);
                 finalize_packet(packet, 22)
             }
-            Self::SyncPlayerPosition(sync_player_position) => {
-                sync_player_position.encode(&mut packet);
-                finalize_packet(packet, 57)
+            Self::Commands(commands) => {
+                commands.encode(&mut packet);
+                finalize_packet(packet, 15)
             }
             Self::ChunkData(chunk_data) => {
                 chunk_data.encode(&mut packet);
                 finalize_packet(packet, 33)
+            }
+            Self::SyncPlayerPosition(sync_player_position) => {
+                sync_player_position.encode(&mut packet);
+                finalize_packet(packet, 57)
             }
             Self::KeepAlive(n) => {
                 packet.write_long(n);

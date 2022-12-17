@@ -53,7 +53,7 @@ pub trait PacketEncoder: Write {
     fn write_varint(&mut self, mut data: i32) {
         loop {
             let mut byte = (data & 0b11111111) as u8;
-            data = data >> 7;
+            data >>= 7;
             if data != 0 {
                 byte |= 0b10000000;
             }
@@ -67,7 +67,7 @@ pub trait PacketEncoder: Write {
     fn write_varlong(&mut self, mut data: i64) {
         loop {
             let mut byte = (data & 0b11111111) as u8;
-            data = data >> 7;
+            data >>= 7;
             if data != 0 {
                 byte |= 0b10000000;
             }
@@ -109,7 +109,7 @@ fn encode_varint(mut data: i32) -> Vec<u8> {
     let mut res = Vec::new();
     loop {
         let mut byte = (data & 0b11111111) as u8;
-        data = data >> 7;
+        data >>= 7;
         if data != 0 {
             byte |= 0b10000000;
         }
@@ -148,11 +148,11 @@ impl PacketDecoder {
             packet_id: 0
         };
         decoder.packet_id = decoder.read_varint();
-        return Ok(decoder);
+        Ok(decoder)
     }
 
     pub fn packet_id(&self) -> i32 {
-        return self.packet_id;
+        self.packet_id
     }
 
     pub fn read_bytes(&mut self, n: usize) -> &[u8] {

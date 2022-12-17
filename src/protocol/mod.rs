@@ -1,3 +1,5 @@
+
+pub mod command;
 pub mod data;
 pub mod serverbound;
 pub mod clientbound;

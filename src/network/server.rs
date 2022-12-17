@@ -1,32 +1,37 @@
-use std::{net::TcpListener, thread, sync::mpsc::{Receiver, Sender, channel}, collections::HashSet};
+use std::{net::{TcpListener, SocketAddr}, thread, sync::mpsc::{Receiver, Sender, channel}, collections::HashSet};
 
 use log::{info, warn, debug};
 use serde_json::json;
 
-use crate::{protocol::{data::PacketEncoder, serverbound::*, clientbound::*}, plugins::{Plugins, Response}, VERSION};
+use crate::{protocol::{data::PacketEncoder, serverbound::*, clientbound::*, command::{Commands, CommandNodeType}}, plugins::{Plugins, Response}, VERSION};
 
 use super::{client::NetworkClient, Player};
 
 pub struct NetworkServer<'lua> {
     plugins: Plugins<'lua>,
+    commands: Commands,
     new_clients: Receiver<NetworkClient>,
     clients: Vec<NetworkClient>,
 }
 
 impl <'lua> NetworkServer<'lua> {
-    pub fn new(addr: String, plugins: Plugins<'lua>) -> Self {
+    pub fn new(addr: SocketAddr, mut plugins: Plugins<'lua>) -> Self {
         let (send, recv) = channel();
         info!("Initializing plugins");
         plugins.init();
+        let mut commands = Commands::new();
+        commands.create_simple_cmd("qc");
+        let commands = plugins.register_commands(commands).unwrap();
         thread::spawn(move || Self::listen(&addr, send));
         Self { 
             plugins,
+            commands,
             new_clients: recv,
             clients: Vec::new(),
         }
     }
 
-    fn listen(addr: &str, send_clients: Sender<NetworkClient>) {
+    fn listen(addr: &SocketAddr, send_clients: Sender<NetworkClient>) {
         info!("Listening on {}", addr);
         let listener = TcpListener::bind(addr).unwrap();
         for (id, stream) in listener.incoming().enumerate() {
@@ -57,7 +62,8 @@ impl <'lua> NetworkServer<'lua> {
         let mut closed = Vec::new();
         for client in self.clients.iter_mut() {
             if client.play {
-                if let Err(_) = client.send_packet(ClientBoundPacket::KeepAlive(0)) {
+                let result = client.send_packet(ClientBoundPacket::KeepAlive(0));
+                if result.is_err() {
                     client.close();
                     if let Some(pl) = &client.player {
                         self.plugins.player_leave(pl);
@@ -77,7 +83,8 @@ impl <'lua> NetworkServer<'lua> {
             };
             let mut alive = true;
             while let Some(packet) = client.recv_packet(&mut alive) {
-                if let Err(_) = self.handle_packet(client, packet) {
+                let result = self.handle_packet(client, packet);
+                if result.is_err() {
                     alive = false;
                     break
                 }
@@ -162,6 +169,20 @@ impl <'lua> NetworkServer<'lua> {
             ServerBoundPacket::ChatMessage(msg) => {
                 self.plugins.chat_message(client.player.as_ref().unwrap(), &msg.message);
             }
+            ServerBoundPacket::ChatCommand(msg) => {
+                let mut parts = msg.message.splitn(1, " ");
+                if let Some(cmd) = parts.next() {
+                    if cmd == "qc" {
+                        client.send_packet(ClientBoundPacket::SystemChatMessage(json!({
+                            "text": format!("QuectoCraft version {}", VERSION),
+                            "color": "green"
+                        }), false))?;
+                    } else {
+                        let args = parts.next().unwrap_or_default();
+                        self.plugins.command(client.player.as_ref().unwrap(), cmd, args);
+                    }
+                }
+            }
         }
         Ok(())
     }
@@ -173,11 +194,11 @@ impl <'lua> NetworkServer<'lua> {
             gamemode: 1,
             prev_gamemode: 1,
             dimensions: vec![
-                "minecraft:world".to_owned(), 
+                "qc:world".to_owned(), 
             ],
             registry_codec: include_bytes!("../resources/registry_codec.nbt").to_vec(),
             dimension_type: "minecraft:the_end".to_owned(),
-            dimension_name: "minecraft:world".to_owned(),
+            dimension_name: "qc:world".to_owned(),
             seed_hash: 0,
             max_players: 0,
             view_distance: 8,
@@ -196,6 +217,7 @@ impl <'lua> NetworkServer<'lua> {
                 data
             }
         }))?;
+        client.send_packet(ClientBoundPacket::Commands(self.commands.clone()))?;
         let mut chunk_data: Vec<u8> = Vec::new();
         for _ in 0..(384 / 16) {
             // number of non-air blocks
