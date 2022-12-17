@@ -1,5 +1,4 @@
 use std::borrow::Cow;
-use std::net::SocketAddr;
 use std::time::Duration;
 use std::io::Write;
 
@@ -40,18 +39,17 @@ fn main() {
 
         writeln!(buf, "\x1b[90m[\x1b[37m{} {color}{}\x1b[37m {}\x1b[90m]\x1b[0m {}", now, record.level(), target, record.args())
     }).init();
+    
+    info!("Starting Quectocraft version {}", VERSION);
 
     let config = load_config().expect("Failed to load config");
-    let addr = SocketAddr::new(config.addr, config.port);
-
-    info!("Starting Quectocraft version {}", VERSION);
 
     let lua = Lua::new();
     let mut plugins = Plugins::new(&lua).expect("Error initializing lua environment");
     std::fs::create_dir_all("plugins").expect("Couldn't create the plugins directory");
     plugins.load_plugins();
     
-    let mut server = NetworkServer::new(addr, plugins);
+    let mut server = NetworkServer::new(config, plugins);
     let sleep_dur = Duration::from_millis(5);
     let mut i = 0;
     loop {

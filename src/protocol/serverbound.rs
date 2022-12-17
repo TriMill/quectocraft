@@ -71,6 +71,7 @@ pub enum ServerBoundPacket {
     PingRequest(i64),
     // login
     LoginStart(LoginStart),
+    LoginPluginResponse { id: i32, data: Option<Vec<u8>> },
     // play
     ChatMessage(ChatMessage),
     ChatCommand(ChatMessage),
@@ -94,8 +95,20 @@ impl ServerBoundPacket {
             (NS::Status, 1) 
                 => ServerBoundPacket::PingRequest(decoder.read_long()),
             (NS::Login, 0) => {
-                *state = NS::Play;
                 ServerBoundPacket::LoginStart(LoginStart::decode(decoder))
+            },
+            (NS::Login, 2) => {
+                let id = decoder.read_varint();
+                let success = decoder.read_bool();
+                let data = if success {
+                    Some(decoder.read_to_end().to_vec())
+                } else {
+                    None
+                };
+                if id == -1 {
+                    *state = NetworkState::Play;
+                }
+                ServerBoundPacket::LoginPluginResponse { id, data }
             },
             (NS::Play, 4) => ServerBoundPacket::ChatCommand(ChatMessage::decode(decoder)),
             (NS::Play, 5) => ServerBoundPacket::ChatMessage(ChatMessage::decode(decoder)),

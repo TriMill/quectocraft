@@ -1,9 +1,11 @@
 use std::{net::{TcpListener, SocketAddr}, thread, sync::mpsc::{Receiver, Sender, channel}, collections::HashSet};
 
-use log::{info, warn, debug};
+use hmac::{Hmac, Mac};
+use log::{info, warn, debug, trace};
 use serde_json::json;
+use sha2::Sha256;
 
-use crate::protocol::{data::PacketEncoder, serverbound::*, clientbound::*, command::Commands, Position};
+use crate::{protocol::{data::PacketEncoder, serverbound::*, clientbound::*, command::Commands, Position}, config::{Config, LoginMode}};
 use crate::plugins::{Plugins, Response};
 use crate::VERSION;
 
@@ -14,18 +16,20 @@ pub struct NetworkServer<'lua> {
     commands: Commands,
     new_clients: Receiver<NetworkClient>,
     clients: Vec<NetworkClient>,
+    config: Config,
 }
 
 impl <'lua> NetworkServer<'lua> {
-    pub fn new(addr: SocketAddr, mut plugins: Plugins<'lua>) -> Self {
+    pub fn new(config: Config, mut plugins: Plugins<'lua>) -> Self {
         let (send, recv) = channel();
         info!("Initializing plugins");
         plugins.init();
         let mut commands = Commands::new();
         commands.create_simple_cmd("qc");
         let commands = plugins.register_commands(commands).unwrap();
-        thread::spawn(move || Self::listen(&addr, send));
-        Self { 
+        thread::spawn(move || Self::listen(&SocketAddr::new(config.addr, config.port), send));
+        Self {
+            config,
             plugins,
             commands,
             new_clients: recv,
@@ -44,7 +48,7 @@ impl <'lua> NetworkServer<'lua> {
             thread::spawn(|| NetworkClient::listen(stream_2, send));
             let client = NetworkClient {
                 id: id as i32,
-                play: false,
+                verified: false,
                 closed: false,
                 stream,
                 serverbound: recv,
@@ -63,13 +67,11 @@ impl <'lua> NetworkServer<'lua> {
     pub fn send_keep_alive(&mut self) {
         let mut closed = Vec::new();
         for client in self.clients.iter_mut() {
-            if client.play {
+            if client.player.is_some() {
                 let result = client.send_packet(ClientBoundPacket::KeepAlive(0));
                 if result.is_err() {
                     client.close();
-                    if let Some(pl) = &client.player {
-                        self.plugins.player_leave(pl);
-                    }
+                    self.plugins.player_leave(client.player.as_ref().unwrap());
                     closed.push(client.id);
                 }
             }
@@ -87,6 +89,7 @@ impl <'lua> NetworkServer<'lua> {
             while let Some(packet) = client.recv_packet(&mut alive) {
                 let result = self.handle_packet(client, packet);
                 if result.is_err() {
+                    warn!("error: {}", result.unwrap_err());
                     alive = false;
                     break
                 }
@@ -102,7 +105,7 @@ impl <'lua> NetworkServer<'lua> {
         for response in self.plugins.get_responses() {
             let _ = self.handle_plugin_response(response);
         }
-        self.clients.retain(|x| !closed.contains(&x.id));
+        self.clients.retain(|x| !closed.contains(&x.id) && !x.closed);
     }
 
     fn handle_plugin_response(&mut self, response: Response) -> std::io::Result<()> {
@@ -137,7 +140,8 @@ impl <'lua> NetworkServer<'lua> {
         Ok(())
     }
 
-    fn handle_packet(&mut self, client: &mut NetworkClient, packet: ServerBoundPacket) -> std::io::Result<()> {
+    fn handle_packet(&mut self, client: &mut NetworkClient, packet: ServerBoundPacket) -> Result<(), Box<dyn std::error::Error>> {
+        trace!("Recieved packet from client {}:", client.id);
         match packet {
             ServerBoundPacket::Ignored(_) => (),
             ServerBoundPacket::Unknown(id) => warn!("Unknown packet: {}", id),
@@ -152,21 +156,80 @@ impl <'lua> NetworkServer<'lua> {
             }
             ServerBoundPacket::LoginStart(login_start) => {
                 if self.clients.iter().filter_map(|x| x.player.as_ref()).any(|x| x.uuid == login_start.uuid) {
-                    client.send_packet(ClientBoundPacket::LoginDisconnect(json!({"translate": "multiplayer.disconnect.duplicate_login"})))?;
+                    client.send_packet(ClientBoundPacket::LoginDisconnect(json!({
+                        "translate": "multiplayer.disconnect.duplicate_login"
+                    })))?;
                     client.close();
-                } else {
-                    client.player = Some(Player {
-                        name: login_start.name.clone(),
-                        uuid: login_start.uuid,
-                    });
-                    client.play = true;
-                    client.send_packet(ClientBoundPacket::LoginSuccess(LoginSuccess {
-                        name: login_start.name,
-                        uuid: login_start.uuid,
-                    }))?;
-                    self.plugins.player_join(client.player.as_ref().unwrap());
-                    self.post_login(client)?;
+                    return Ok(())
                 }
+                client.player = Some(Player {
+                    name: login_start.name.clone(),
+                    uuid: login_start.uuid,
+                });
+                match self.config.login {
+                    LoginMode::Offline => {
+                        client.verified = true;
+                        client.send_packet(ClientBoundPacket::LoginPluginRequest{ 
+                            id: -1, 
+                            channel: "qc:init".to_owned(), 
+                            data: Vec::new() 
+                        })?;
+                    },
+                    LoginMode::Velocity => {
+                        client.send_packet(ClientBoundPacket::LoginPluginRequest{ 
+                            id: 10, 
+                            channel: "velocity:player_info".to_owned(), 
+                            data: vec![1],
+                        })?
+                    }
+                }
+            }
+            // Finalize login
+            ServerBoundPacket::LoginPluginResponse { id: -1, .. } => {
+                if !client.verified {
+                    client.send_packet(ClientBoundPacket::Disconnect(json!({
+                        "text": "Failed to verify your connection",
+                        "color": "red",
+                    })))?;
+                    client.close();
+                }
+                client.send_packet(ClientBoundPacket::LoginSuccess(LoginSuccess {
+                    name: client.player.as_ref().unwrap().name.to_owned(),
+                    uuid: client.player.as_ref().unwrap().uuid,
+                }))?;
+                self.plugins.player_join(client.player.as_ref().unwrap());
+                self.post_login(client)?;
+            }
+            // Velocity login
+            ServerBoundPacket::LoginPluginResponse { id: 10, data } => {
+                let Some(data) = data else {
+                    client.send_packet(ClientBoundPacket::LoginDisconnect(json!({
+                        "text": "This server can only be connected to via a Velocity proxy",
+                        "color": "red"
+                    })))?;
+                    client.close();
+                    return Ok(());
+                };
+                let (sig, data) = data.split_at(32);
+                let mut mac = Hmac::<Sha256>::new_from_slice(self.config.velocity_secret.clone().unwrap().as_bytes())?;
+                mac.update(data);
+                if let Err(_) = mac.verify_slice(sig) {
+                    client.send_packet(ClientBoundPacket::Disconnect(json!({ 
+                        "text": "Could not verify secret. Ensure that the secrets configured for Velocity and Quectocraft match."
+                    })))?;
+                    client.close();
+                    return Ok(())
+                }
+                client.verified = true;
+                client.send_packet(ClientBoundPacket::LoginPluginRequest{ 
+                    id: -1, 
+                    channel: "qc:init".to_owned(), 
+                    data: Vec::new() 
+                })?;
+            }
+            ServerBoundPacket::LoginPluginResponse { .. } => {
+                client.send_packet(ClientBoundPacket::LoginDisconnect(json!({"text": "bad plugin response"})))?;
+                client.close();
             }
             ServerBoundPacket::ChatMessage(msg) => {
                 self.plugins.chat_message(client.player.as_ref().unwrap(), &msg.message);

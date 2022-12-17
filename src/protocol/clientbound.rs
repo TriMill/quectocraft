@@ -142,6 +142,7 @@ pub enum ClientBoundPacket {
     StatusResponse(String),
     PingResponse(i64),
     // login
+    LoginPluginRequest { id: i32, channel: String, data: Vec<u8> },
     LoginSuccess(LoginSuccess),
     LoginDisconnect(serde_json::Value),
     // play
@@ -174,6 +175,12 @@ impl ClientBoundPacket {
             Self::LoginDisconnect(message) => {
                 packet.write_string(262144, &message.to_string());
                 finalize_packet(packet, 0)
+            }
+            Self::LoginPluginRequest { id, channel, data } => {
+                packet.write_varint(id);
+                packet.write_string(32767, &channel);
+                packet.write_bytes(&data);
+                finalize_packet(packet, 4)
             }
             Self::LoginSuccess(login_success) => {
                 login_success.encode(&mut packet);

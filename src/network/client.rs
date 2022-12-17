@@ -8,7 +8,7 @@ use super::Player;
 
 pub struct NetworkClient {
     pub id: i32,
-    pub play: bool,
+    pub verified: bool,
     pub closed: bool,
     pub stream: TcpStream,    
     pub serverbound: Receiver<ServerBoundPacket>,

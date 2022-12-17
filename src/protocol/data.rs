@@ -50,7 +50,8 @@ pub trait PacketEncoder: Write {
         self.write_all(&data.to_be_bytes()).unwrap();
     }
 
-    fn write_varint(&mut self, mut data: i32) {
+    fn write_varint(&mut self, data: i32) {
+        let mut data = data as u32;
         loop {
             let mut byte = (data & 0b11111111) as u8;
             data >>= 7;
@@ -64,7 +65,8 @@ pub trait PacketEncoder: Write {
         }
     }
 
-    fn write_varlong(&mut self, mut data: i64) {
+    fn write_varlong(&mut self, data: i64) {
+        let mut data = data as u64;
         loop {
             let mut byte = (data & 0b11111111) as u8;
             data >>= 7;
@@ -158,6 +160,12 @@ impl PacketDecoder {
     pub fn read_bytes(&mut self, n: usize) -> &[u8] {
         let ret = &self.data[self.idx..self.idx+n];
         self.idx += n;
+        ret
+    }
+
+    pub fn read_to_end(&mut self) -> &[u8] {
+        let ret = &self.data[self.idx..];
+        self.idx = self.data.len();
         ret
     }
 
