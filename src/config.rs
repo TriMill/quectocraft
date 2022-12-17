@@ -3,6 +3,7 @@ use std::{net::IpAddr, fs::OpenOptions};
 use serde::Deserialize;
 
 #[derive(Deserialize, PartialEq, Eq)]
+#[serde(rename_all="lowercase")]
 pub enum LoginMode {
     Offline,
     Velocity,

@@ -4,12 +4,12 @@ use std::io::Write;
 
 use chrono::Utc;
 use env_logger::Env;
-use log::info;
+use log::{info, warn};
 use mlua::Lua;
 use network::NetworkServer;
 use plugins::Plugins;
 
-use crate::config::load_config;
+use crate::config::{load_config, LoginMode};
 
 mod config;
 mod plugins;
@@ -43,6 +43,10 @@ fn main() {
     info!("Starting Quectocraft version {}", VERSION);
 
     let config = load_config().expect("Failed to load config");
+    match config.login {
+        LoginMode::Offline => warn!("Running in offline mode!"),
+        LoginMode::Velocity => info!("Running in velocity mode"),
+    }
 
     let lua = Lua::new();
     let mut plugins = Plugins::new(&lua).expect("Error initializing lua environment");
