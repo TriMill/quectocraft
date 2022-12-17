@@ -3,7 +3,9 @@ use std::{net::{TcpListener, SocketAddr}, thread, sync::mpsc::{Receiver, Sender,
 use log::{info, warn, debug};
 use serde_json::json;
 
-use crate::{protocol::{data::PacketEncoder, serverbound::*, clientbound::*, command::{Commands, CommandNodeType}}, plugins::{Plugins, Response}, VERSION};
+use crate::protocol::{data::PacketEncoder, serverbound::*, clientbound::*, command::Commands, Position};
+use crate::plugins::{Plugins, Response};
+use crate::VERSION;
 
 use super::{client::NetworkClient, Player};
 
@@ -142,7 +144,7 @@ impl <'lua> NetworkServer<'lua> {
             ServerBoundPacket::Handshake(_) => (),
             ServerBoundPacket::StatusRequest() 
                 => client.send_packet(ClientBoundPacket::StatusResponse(
-                    r#"{"version":{"name":"1.19.2","protocol":760}}"#.to_owned()
+                    r#"{"version":{"name":"1.19.3","protocol":761}}"#.to_owned()
                 ))?,
             ServerBoundPacket::PingRequest(n) => {
                 client.send_packet(ClientBoundPacket::PingResponse(n))?;
@@ -240,6 +242,9 @@ impl <'lua> NetworkServer<'lua> {
             heightmap,
             chunk_data,
         }))?;
+        client.send_packet(ClientBoundPacket::SetDefaultSpawnPosition(
+            Position { x: 0, y: 0, z: 0 }, 0.0
+        ))?;
         client.send_packet(ClientBoundPacket::SyncPlayerPosition(SyncPlayerPosition {
             x: 0.0,
             y: 64.0,

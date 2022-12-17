@@ -14,7 +14,7 @@ pub enum NetworkState {
 
 #[derive(Clone, Copy, Debug)]
 pub struct Position {
-    x: i32,
-    y: i16,
-    z: i32
+    pub x: i32,
+    pub y: i16,
+    pub z: i32
 }

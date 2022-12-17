@@ -30,30 +30,18 @@ pub struct SigData {
 #[derive(Debug)]
 pub struct LoginStart {
     pub name: String,
-    pub sig_data: Option<SigData>,
     pub uuid: Uuid,
 }
 
 impl LoginStart {
     pub fn decode(mut decoder: PacketDecoder) -> Self {
         let name = decoder.read_string();
-        let has_sig_data = decoder.read_bool();
-        let sig_data = if has_sig_data {
-            let timestamp = decoder.read_long();
-            let pubkey_len = decoder.read_varint();
-            let pubkey = decoder.read_bytes(pubkey_len as usize).to_vec();
-            let sig_len = decoder.read_varint();
-            let sig = decoder.read_bytes(sig_len as usize).to_vec();
-            Some(SigData { timestamp, pubkey, sig })
-        } else {
-            None
-        };
         let has_uuid = decoder.read_bool();
         if !has_uuid {
             panic!("Client didn't supply UUID");
         }
         let uuid = decoder.read_uuid();
-        Self { name, sig_data, uuid }
+        Self { name, uuid }
     }
 }
 
@@ -111,7 +99,7 @@ impl ServerBoundPacket {
             },
             (NS::Play, 4) => ServerBoundPacket::ChatCommand(ChatMessage::decode(decoder)),
             (NS::Play, 5) => ServerBoundPacket::ChatMessage(ChatMessage::decode(decoder)),
-            (NS::Play, id @ (18 | 20 | 21 | 22 | 30)) => ServerBoundPacket::Ignored(id),
+            (NS::Play, id @ (17 | 19 | 20 | 21 | 29)) => ServerBoundPacket::Ignored(id),
             (_, id) => ServerBoundPacket::Unknown(id),
         }
     }

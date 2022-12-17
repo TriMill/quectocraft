@@ -153,6 +153,7 @@ pub enum ClientBoundPacket {
     KeepAlive(i64),
     PlayerAbilities(i8, f32, f32),
     Disconnect(serde_json::Value),
+    SetDefaultSpawnPosition(Position, f32),
     SystemChatMessage(serde_json::Value, bool),
 }
 
@@ -181,42 +182,47 @@ impl ClientBoundPacket {
             // Play
             Self::Disconnect(message) => {
                 packet.write_string(262144, &message.to_string());
-                finalize_packet(packet, 25)
+                finalize_packet(packet, 23)
             }
             Self::LoginPlay(login_play) => {
                 login_play.encode(&mut packet);
-                finalize_packet(packet, 37)
+                finalize_packet(packet, 36)
             }
             Self::PluginMessage(plugin_message) => {
                 plugin_message.encode(&mut packet);
-                finalize_packet(packet, 22)
+                finalize_packet(packet, 21)
             }
             Self::Commands(commands) => {
                 commands.encode(&mut packet);
-                finalize_packet(packet, 15)
+                finalize_packet(packet, 14)
             }
             Self::ChunkData(chunk_data) => {
                 chunk_data.encode(&mut packet);
-                finalize_packet(packet, 33)
+                finalize_packet(packet, 32)
             }
             Self::SyncPlayerPosition(sync_player_position) => {
                 sync_player_position.encode(&mut packet);
-                finalize_packet(packet, 57)
+                finalize_packet(packet, 56)
             }
             Self::KeepAlive(n) => {
                 packet.write_long(n);
-                finalize_packet(packet, 32)
+                finalize_packet(packet, 31)
+            }
+            Self::SetDefaultSpawnPosition(pos, angle) => {
+                packet.write_position(pos);
+                packet.write_float(angle);
+                finalize_packet(packet, 76)
             }
             Self::PlayerAbilities(flags, speed, view) => {
                 packet.write_byte(flags);
                 packet.write_float(speed);
                 packet.write_float(view);
-                finalize_packet(packet, 49)
+                finalize_packet(packet, 48)
             }
             Self::SystemChatMessage(msg, overlay) => {
                 packet.write_string(262144, &msg.to_string());
                 packet.write_bool(overlay);
-                finalize_packet(packet, 98)
+                finalize_packet(packet, 96)
             }
         }
     }
