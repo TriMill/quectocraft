@@ -168,7 +168,7 @@ impl <'lua> NetworkServer<'lua> {
                 self.plugins.chat_message(client.player.as_ref().unwrap(), &msg.message);
             }
             ServerBoundPacket::ChatCommand(msg) => {
-                let mut parts = msg.message.splitn(1, " ");
+                let mut parts = msg.message.splitn(2, ' ');
                 if let Some(cmd) = parts.next() {
                     if cmd == "qc" {
                         client.send_packet(SystemChatMessage { message: json!({
@@ -229,7 +229,7 @@ impl <'lua> NetworkServer<'lua> {
         let (sig, data) = data.split_at(32);
         let mut mac = Hmac::<Sha256>::new_from_slice(self.config.velocity_secret.clone().unwrap().as_bytes())?;
         mac.update(data);
-        if let Err(_) = mac.verify_slice(sig) {
+        if mac.verify_slice(sig).is_err() {
             client.send_packet(Disconnect { reason: json!({ 
                 "text": "Could not verify secret. Ensure that the secrets configured for Velocity and Quectocraft match."
             })})?;

@@ -127,7 +127,7 @@ impl ClientBoundPacket for LoginPlay {
         encoder.write_ubyte(self.prev_gamemode);
         encoder.write_varint(self.dimensions.len() as i32);
         for dim in &self.dimensions {
-            encoder.write_string(32767, &dim);
+            encoder.write_string(32767, dim);
         }
         encoder.write_bytes(&self.registry_codec);
         encoder.write_string(32767, &self.dimension_type);

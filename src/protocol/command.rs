@@ -82,12 +82,6 @@ impl Commands {
 
 }
 
-pub enum NodeError {
-    InvalidParent(i32),
-    InvalidRedirect(i32),
-    BadTypeData,
-}
-
 #[derive(Debug, Clone)]
 pub struct CommandNode {
     executable: bool,
@@ -125,19 +119,20 @@ impl CommandNode {
         match &self.type_data {
             CommandNodeType::Root => (),
             CommandNodeType::Literal { name } => {
-                encoder.write_string(32767, &name);
+                encoder.write_string(32767, name);
             }
             CommandNodeType::Argument { name, parser } => {
-                encoder.write_string(32767, &name);
+                encoder.write_string(32767, name);
                 parser.encode(encoder);
             }
         }
         if let Some(suggestion) = &self.suggestion {
-            encoder.write_string(32767, &suggestion);
+            encoder.write_string(32767, suggestion);
         }
     }
 }
 
+#[allow(unused)]
 #[derive(Debug, Clone, Copy)]
 pub enum Parser {
     Bool,
@@ -154,25 +149,25 @@ impl Parser {
             Self::Bool => encoder.write_varint(0),
             Self::Float{ min, max } => {
                 encoder.write_varint(1);
-                encoder.write_byte( if min.is_some() { 1 } else { 0 } + if max.is_some() { 2 } else { 0 } );
+                encoder.write_byte( i8::from(min.is_some()) + 2 * i8::from(max.is_some()) );
                 if let Some(min) = min { encoder.write_float(*min) };
                 if let Some(max) = max { encoder.write_float(*max) };
             },
             Self::Double{ min, max } => {
                 encoder.write_varint(2);
-                encoder.write_byte( if min.is_some() { 1 } else { 0 } + if max.is_some() { 2 } else { 0 } );
+                encoder.write_byte( i8::from(min.is_some()) + 2 * i8::from(max.is_some()) );
                 if let Some(min) = min { encoder.write_double(*min) };
                 if let Some(max) = max { encoder.write_double(*max) };
             },
             Self::Int{ min, max } => {
                 encoder.write_varint(3);
-                encoder.write_byte( if min.is_some() { 1 } else { 0 } + if max.is_some() { 2 } else { 0 } );
+                encoder.write_byte( i8::from(min.is_some()) + 2 * i8::from(max.is_some()) );
                 if let Some(min) = min { encoder.write_int(*min) };
                 if let Some(max) = max { encoder.write_int(*max) };
             },
             Self::Long{ min, max } => {
                 encoder.write_varint(4);
-                encoder.write_byte( if min.is_some() { 1 } else { 0 } + if max.is_some() { 2 } else { 0 } );
+                encoder.write_byte( i8::from(min.is_some()) + 2 * i8::from(max.is_some()) );
                 if let Some(min) = min { encoder.write_long(*min) };
                 if let Some(max) = max { encoder.write_long(*max) };
             },
@@ -188,6 +183,7 @@ impl Parser {
     }
 }
 
+#[allow(unused)]
 #[derive(Debug, Clone, Copy)]
 pub enum StringKind {
     Single,
