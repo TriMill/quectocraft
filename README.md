@@ -8,9 +8,6 @@ Quectocraft is a minimal, extensible, efficient Minecraft server implementation 
 - Extensible: Via its Lua plugin system, Quectocraft can be configured to do a variety of things.
 - Efficient: The vanilla Minecraft server, and even more efficient servers like Spigot and Paper, all use significant amounts of CPU even while idling with no players connected. Due to its low CPU and memory usage, Quectocraft is suitable for running on lower-end systems, or alongside another server without causing additional lag.
 
-## Why?
+## Plugin API
 
-I'm mostly just writing this for fun, but here are some potential applications:
-- A lobby for a server network
-- A queue that players have to wait in before joining another server
-- A server to send players to if they are AFK for too long
+See [Plugin API](docs/plugins.md)
