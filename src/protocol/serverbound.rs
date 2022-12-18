@@ -61,6 +61,25 @@ impl ChatMessage {
 }
 
 #[derive(Debug)]
+pub struct LoginPluginResponse {
+    pub id: i32,
+    pub data: Option<Vec<u8>>,
+}
+
+impl LoginPluginResponse {
+    pub fn decode(mut decoder: PacketDecoder) -> Self {
+        let id = decoder.read_varint();
+        let success = decoder.read_bool();
+        let data = if success {
+            Some(decoder.read_to_end().to_vec())
+        } else {
+            None
+        };
+        Self { id, data }
+    }
+}
+
+#[derive(Debug)]
 pub enum ServerBoundPacket {
     Unknown(i32),
     Ignored(i32),
@@ -71,7 +90,7 @@ pub enum ServerBoundPacket {
     PingRequest(i64),
     // login
     LoginStart(LoginStart),
-    LoginPluginResponse { id: i32, data: Option<Vec<u8>> },
+    LoginPluginResponse(LoginPluginResponse),
     // play
     ChatMessage(ChatMessage),
     ChatCommand(ChatMessage),
@@ -98,17 +117,11 @@ impl ServerBoundPacket {
                 ServerBoundPacket::LoginStart(LoginStart::decode(decoder))
             },
             (NS::Login, 2) => {
-                let id = decoder.read_varint();
-                let success = decoder.read_bool();
-                let data = if success {
-                    Some(decoder.read_to_end().to_vec())
-                } else {
-                    None
-                };
-                if id == -1 {
+                let lpr = LoginPluginResponse::decode(decoder);
+                if lpr.id == -1 {
                     *state = NetworkState::Play;
                 }
-                ServerBoundPacket::LoginPluginResponse { id, data }
+                ServerBoundPacket::LoginPluginResponse(lpr)
             },
             (NS::Play, 4) => ServerBoundPacket::ChatCommand(ChatMessage::decode(decoder)),
             (NS::Play, 5) => ServerBoundPacket::ChatMessage(ChatMessage::decode(decoder)),

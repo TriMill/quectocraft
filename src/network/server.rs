@@ -68,7 +68,7 @@ impl <'lua> NetworkServer<'lua> {
         let mut closed = Vec::new();
         for client in self.clients.iter_mut() {
             if client.player.is_some() {
-                let result = client.send_packet(ClientBoundPacket::KeepAlive(0));
+                let result = client.send_packet(KeepAlive { data: 0 });
                 if result.is_err() {
                     client.close();
                     self.plugins.player_leave(client.player.as_ref().unwrap());
@@ -114,7 +114,7 @@ impl <'lua> NetworkServer<'lua> {
                 for client in self.clients.iter_mut() {
                     if let Some(p) = &client.player {
                         if p.name == player || p.uuid.to_string() == player {
-                            client.send_packet(ClientBoundPacket::SystemChatMessage(message, false))?;
+                            client.send_packet(SystemChatMessage { message, overlay: false })?;
                             break
                         }
                     }
@@ -123,7 +123,7 @@ impl <'lua> NetworkServer<'lua> {
             Response::Broadcast { message } => {
                 for client in self.clients.iter_mut() {
                     if client.player.is_some() {
-                        client.send_packet(ClientBoundPacket::SystemChatMessage(message.clone(), false))?;
+                        client.send_packet(SystemChatMessage { message: message.clone(), overlay: false })?;
                     }
                 }
             },
@@ -131,7 +131,7 @@ impl <'lua> NetworkServer<'lua> {
                 for client in self.clients.iter_mut() {
                     if let Some(pl) = &client.player {
                         if pl.name == player || pl.uuid.to_string() == player {
-                            client.send_packet(ClientBoundPacket::Disconnect(reason.clone()))?;
+                            client.send_packet(Disconnect { reason: reason.clone() })?;
                         }
                     }
                 }
@@ -147,88 +147,21 @@ impl <'lua> NetworkServer<'lua> {
             ServerBoundPacket::Unknown(id) => warn!("Unknown packet: {}", id),
             ServerBoundPacket::Handshake(_) => (),
             ServerBoundPacket::StatusRequest() 
-                => client.send_packet(ClientBoundPacket::StatusResponse(
-                    r#"{"version":{"name":"1.19.3","protocol":761}}"#.to_owned()
-                ))?,
+                => client.send_packet(StatusResponse {
+                    data: r#"{"version":{"name":"1.19.3","protocol":761}}"#.to_owned()
+                })?,
             ServerBoundPacket::PingRequest(n) => {
-                client.send_packet(ClientBoundPacket::PingResponse(n))?;
+                client.send_packet(PingResponse { data: n })?;
                 client.close();
             }
-            ServerBoundPacket::LoginStart(login_start) => {
-                if self.clients.iter().filter_map(|x| x.player.as_ref()).any(|x| x.uuid == login_start.uuid) {
-                    client.send_packet(ClientBoundPacket::LoginDisconnect(json!({
-                        "translate": "multiplayer.disconnect.duplicate_login"
-                    })))?;
-                    client.close();
-                    return Ok(())
-                }
-                client.player = Some(Player {
-                    name: login_start.name.clone(),
-                    uuid: login_start.uuid,
-                });
-                match self.config.login {
-                    LoginMode::Offline => {
-                        client.verified = true;
-                        client.send_packet(ClientBoundPacket::LoginPluginRequest{ 
-                            id: -1, 
-                            channel: "qc:init".to_owned(), 
-                            data: Vec::new() 
-                        })?;
-                    },
-                    LoginMode::Velocity => {
-                        client.send_packet(ClientBoundPacket::LoginPluginRequest{ 
-                            id: 10, 
-                            channel: "velocity:player_info".to_owned(), 
-                            data: vec![1],
-                        })?
-                    }
-                }
-            }
-            // Finalize login
-            ServerBoundPacket::LoginPluginResponse { id: -1, .. } => {
-                if !client.verified {
-                    client.send_packet(ClientBoundPacket::Disconnect(json!({
-                        "text": "Failed to verify your connection",
-                        "color": "red",
-                    })))?;
-                    client.close();
-                }
-                client.send_packet(ClientBoundPacket::LoginSuccess(LoginSuccess {
-                    name: client.player.as_ref().unwrap().name.to_owned(),
-                    uuid: client.player.as_ref().unwrap().uuid,
-                }))?;
-                self.plugins.player_join(client.player.as_ref().unwrap());
-                self.post_login(client)?;
-            }
-            // Velocity login
-            ServerBoundPacket::LoginPluginResponse { id: 10, data } => {
-                let Some(data) = data else {
-                    client.send_packet(ClientBoundPacket::LoginDisconnect(json!({
-                        "text": "This server can only be connected to via a Velocity proxy",
-                        "color": "red"
-                    })))?;
-                    client.close();
-                    return Ok(());
-                };
-                let (sig, data) = data.split_at(32);
-                let mut mac = Hmac::<Sha256>::new_from_slice(self.config.velocity_secret.clone().unwrap().as_bytes())?;
-                mac.update(data);
-                if let Err(_) = mac.verify_slice(sig) {
-                    client.send_packet(ClientBoundPacket::Disconnect(json!({ 
-                        "text": "Could not verify secret. Ensure that the secrets configured for Velocity and Quectocraft match."
-                    })))?;
-                    client.close();
-                    return Ok(())
-                }
-                client.verified = true;
-                client.send_packet(ClientBoundPacket::LoginPluginRequest{ 
-                    id: -1, 
-                    channel: "qc:init".to_owned(), 
-                    data: Vec::new() 
-                })?;
-            }
+            ServerBoundPacket::LoginStart(login_start) 
+                => self.start_login(client, login_start)?,
+            ServerBoundPacket::LoginPluginResponse(LoginPluginResponse { id: 10, data }) 
+                => self.velocity_login(client, data)?,
+            ServerBoundPacket::LoginPluginResponse(LoginPluginResponse{ id: -1, .. }) 
+                => self.login(client)?,
             ServerBoundPacket::LoginPluginResponse { .. } => {
-                client.send_packet(ClientBoundPacket::LoginDisconnect(json!({"text": "bad plugin response"})))?;
+                client.send_packet(LoginDisconnect { reason: json!({"text": "bad plugin response"}) })?;
                 client.close();
             }
             ServerBoundPacket::ChatMessage(msg) => {
@@ -238,10 +171,10 @@ impl <'lua> NetworkServer<'lua> {
                 let mut parts = msg.message.splitn(1, " ");
                 if let Some(cmd) = parts.next() {
                     if cmd == "qc" {
-                        client.send_packet(ClientBoundPacket::SystemChatMessage(json!({
+                        client.send_packet(SystemChatMessage { message: json!({
                             "text": format!("QuectoCraft version {}", VERSION),
                             "color": "green"
-                        }), false))?;
+                        }), overlay: false })?;
                     } else {
                         let args = parts.next().unwrap_or_default();
                         self.plugins.command(client.player.as_ref().unwrap(), cmd, args);
@@ -252,12 +185,85 @@ impl <'lua> NetworkServer<'lua> {
         Ok(())
     }
 
-    fn post_login(&mut self, client: &mut NetworkClient) -> std::io::Result<()> {
-        client.send_packet(ClientBoundPacket::LoginPlay(LoginPlay {
+    fn start_login(&mut self, client: &mut NetworkClient, login_start: LoginStart) -> Result<(), Box<dyn std::error::Error>> {
+        if self.clients.iter().filter_map(|x| x.player.as_ref()).any(|x| x.uuid == login_start.uuid) {
+            client.send_packet(LoginDisconnect { reason: json!({
+                "translate": "multiplayer.disconnect.duplicate_login"
+            })})?;
+            client.close();
+            return Ok(())
+        }
+        client.player = Some(Player {
+            name: login_start.name.clone(),
+            uuid: login_start.uuid,
+        });
+        match self.config.login {
+            LoginMode::Offline => {
+                client.verified = true;
+                client.send_packet(LoginPluginRequest{ 
+                    id: -1, 
+                    channel: "qc:init".to_owned(), 
+                    data: Vec::new() 
+                })?;
+            },
+            LoginMode::Velocity => {
+                client.send_packet(LoginPluginRequest{ 
+                    id: 10, 
+                    channel: "velocity:player_info".to_owned(), 
+                    data: vec![1],
+                })?
+            }
+        }
+        Ok(())
+    }
+
+    fn velocity_login(&mut self, client: &mut NetworkClient, data: Option<Vec<u8>>) -> Result<(), Box<dyn std::error::Error>> {
+        let Some(data) = data else {
+            client.send_packet(LoginDisconnect { reason: json!({
+                "text": "This server can only be connected to via a Velocity proxy",
+                "color": "red"
+            })})?;
+            client.close();
+            return Ok(());
+        };
+        let (sig, data) = data.split_at(32);
+        let mut mac = Hmac::<Sha256>::new_from_slice(self.config.velocity_secret.clone().unwrap().as_bytes())?;
+        mac.update(data);
+        if let Err(_) = mac.verify_slice(sig) {
+            client.send_packet(Disconnect { reason: json!({ 
+                "text": "Could not verify secret. Ensure that the secrets configured for Velocity and Quectocraft match."
+            })})?;
+            client.close();
+            return Ok(())
+        }
+        client.verified = true;
+        client.send_packet(LoginPluginRequest{ 
+            id: -1, 
+            channel: "qc:init".to_owned(), 
+            data: Vec::new() 
+        })?;
+        Ok(())
+    }
+
+    fn login(&mut self, client: &mut NetworkClient) -> std::io::Result<()> {
+        if !client.verified {
+            client.send_packet(Disconnect { reason: json!({
+                "text": "Failed to verify your connection",
+                "color": "red",
+            })})?;
+            client.close();
+            return Ok(())
+        }
+        client.send_packet(LoginSuccess {
+            name: client.player.as_ref().unwrap().name.to_owned(),
+            uuid: client.player.as_ref().unwrap().uuid,
+        })?;
+        self.plugins.player_join(client.player.as_ref().unwrap());
+        client.send_packet(LoginPlay {
             eid: client.id,
             is_hardcore: false,
-            gamemode: 1,
-            prev_gamemode: 1,
+            gamemode: 3,
+            prev_gamemode: 3,
             dimensions: vec![
                 "qc:world".to_owned(), 
             ],
@@ -273,16 +279,16 @@ impl <'lua> NetworkServer<'lua> {
             is_debug: false,
             is_flat: false,
             death_location: None,
-        }))?;
-        client.send_packet(ClientBoundPacket::PluginMessage(PluginMessage {
+        })?;
+        client.send_packet(PluginMessage {
             channel: "minecraft:brand".to_owned(),
             data: {
                 let mut data = Vec::new();
                 data.write_string(32767, &format!("Quectocraft {}", VERSION));
                 data
             }
-        }))?;
-        client.send_packet(ClientBoundPacket::Commands(self.commands.clone()))?;
+        })?;
+        client.send_packet(self.commands.clone())?;
         let mut chunk_data: Vec<u8> = Vec::new();
         for _ in 0..(384 / 16) {
             // number of non-air blocks
@@ -299,16 +305,16 @@ impl <'lua> NetworkServer<'lua> {
         let hmdata = vec![0i64; 37];
         let mut heightmap = nbt::Blob::new();
         heightmap.insert("MOTION_BLOCKING", hmdata).unwrap();
-        client.send_packet(ClientBoundPacket::ChunkData(ChunkData {
+        client.send_packet(ChunkData {
             x: 0,
             z: 0,
             heightmap,
             chunk_data,
-        }))?;
-        client.send_packet(ClientBoundPacket::SetDefaultSpawnPosition(
-            Position { x: 0, y: 0, z: 0 }, 0.0
-        ))?;
-        client.send_packet(ClientBoundPacket::SyncPlayerPosition(SyncPlayerPosition {
+        })?;
+        client.send_packet(SetDefaultSpawnPosition {
+            pos: Position { x: 0, y: 0, z: 0 }, angle: 0.0
+        })?;
+        client.send_packet(SyncPlayerPosition {
             x: 0.0,
             y: 64.0,
             z: 0.0,
@@ -317,7 +323,7 @@ impl <'lua> NetworkServer<'lua> {
             flags: 0,
             teleport_id: 0,
             dismount: false
-        }))?;
+        })?;
         // TODO why doesn't this work with quilt?
         // client.send_packet(ClientBoundPacket::PlayerAbilities(0x0f, 0.05, 0.1))?;
         Ok(())

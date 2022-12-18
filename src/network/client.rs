@@ -43,8 +43,8 @@ impl NetworkClient {
         }
     }
 
-    pub fn send_packet(&mut self, packet: ClientBoundPacket) -> std::io::Result<()> {
-        self.stream.write_all(&packet.encode())?;
+    pub fn send_packet(&mut self, packet: impl ClientBoundPacket) -> std::io::Result<()> {
+        self.stream.write_all(&encode_packet(packet))?;
         Ok(())
     }
 

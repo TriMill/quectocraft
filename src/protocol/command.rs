@@ -1,8 +1,21 @@
-use super::data::PacketEncoder;
+use super::{data::PacketEncoder, clientbound::ClientBoundPacket};
 
 #[derive(Debug, Clone)]
 pub struct Commands {
     nodes: Vec<CommandNode>,
+}
+
+impl ClientBoundPacket for Commands {
+    fn encode(&self, encoder: &mut impl PacketEncoder) {
+        encoder.write_varint(self.nodes.len() as i32);
+        for node in &self.nodes {
+            node.encode(encoder);
+        }
+        // root node
+        encoder.write_varint(0);
+    }
+
+    fn packet_id(&self) -> i32 { 0x0e }
 }
 
 impl Commands {
@@ -67,14 +80,6 @@ impl Commands {
         self.nodes[node as usize].children.push(child);
     }
 
-    pub fn encode(&self, encoder: &mut impl PacketEncoder) {
-        encoder.write_varint(self.nodes.len() as i32);
-        for node in &self.nodes {
-            node.encode(encoder);
-        }
-        // root node
-        encoder.write_varint(0);
-    }
 }
 
 pub enum NodeError {
