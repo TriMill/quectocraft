@@ -20,4 +20,8 @@ function plugin.command(command, args, name, uuid)
     logger.info("player " .. name .. " ran /" .. command .. " " .. args)
 end
 
+function plugin.playerJoin(name, uuid)
+    logger.info("player joined: " .. name .. " with uuid " .. uuid)
+end
+
 return plugin

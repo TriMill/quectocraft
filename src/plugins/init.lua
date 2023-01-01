@@ -32,6 +32,16 @@ function server.broadcast(message)
     table.insert(_qc.responses, { type = "broadcast", message = message })
 end
 
+function server.sendPluginMessage(player, channel, data)
+    if type(player) ~= "string" then
+        error("player must be a string")
+    end
+    if type(channel) ~= "string" then
+        error("channel must be a string")
+    end
+    table.insert(_qc.responses, {type = "plugin_message", player = player, channel = channel, data = data})
+end
+
 function server.disconnect(player, reason)
     local reason = assert(to_chat(reason, { translate = "multiplayer.disconnect.generic" }))
     table.insert(_qc.responses, { type = "disconnect", player = player, reason = reason })

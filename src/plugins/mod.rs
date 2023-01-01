@@ -17,6 +17,8 @@ mod plugin;
 pub enum Response {
     #[serde(rename = "message")]
     Message { player: String, message: serde_json::Value },
+    #[serde(rename = "plugin_message")]
+    PluginMessage { player: String, channel: String, data: Vec<u8> },
     #[serde(rename = "broadcast")]
     Broadcast { message: serde_json::Value },
     #[serde(rename = "disconnect")]
@@ -177,6 +179,16 @@ impl <'lua> Plugins<'lua> {
                 }
             } else {
                 warn!("Plugin {} registered a command but no command handler was found", pl.id);
+            }
+        }
+    }
+
+    pub fn plugin_message(&self, player: &Player, channel: &str, data: &[u8]) {
+        for pl in &self.plugins {
+            if let Some(func) = &pl.event_handlers.plugin_message {
+                if let Err(e) = func.call::<_, ()>((channel, data, player.name.as_str(), player.uuid.to_string())) {
+                    warn!("Error in plugin {}: {}", pl.name, e);
+                }
             }
         }
     }

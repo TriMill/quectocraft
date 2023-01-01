@@ -80,6 +80,20 @@ impl LoginPluginResponse {
 }
 
 #[derive(Debug)]
+pub struct SPluginMessage {
+    pub channel: String,
+    pub data: Vec<u8>,
+}
+
+impl SPluginMessage {
+    pub fn decode(mut decoder: PacketDecoder) -> Self {
+        let channel = decoder.read_string();
+        let data = decoder.read_to_end().to_vec();
+        Self { channel, data }
+    }
+}
+
+#[derive(Debug)]
 pub enum ServerBoundPacket {
     Unknown(i32),
     Ignored(i32),
@@ -94,13 +108,14 @@ pub enum ServerBoundPacket {
     // play
     ChatMessage(ChatMessage),
     ChatCommand(ChatMessage),
+    PluginMessage(SPluginMessage),
 }
 
 impl ServerBoundPacket {
     pub fn decode(state: &mut NetworkState, mut decoder: PacketDecoder) -> ServerBoundPacket {
         use NetworkState as NS;
         match (*state, decoder.packet_id()) {
-            (NS::Handshake, 0) => {
+            (NS::Handshake, 0x00) => {
                 let hs = Handshake::decode(decoder);
                 match hs.next_state {
                     1 => *state = NS::Status,
@@ -109,23 +124,24 @@ impl ServerBoundPacket {
                 }
                 ServerBoundPacket::Handshake(hs)
             },
-            (NS::Status, 0) 
+            (NS::Status, 0x00) 
                 => ServerBoundPacket::StatusRequest(),
-            (NS::Status, 1) 
+            (NS::Status, 0x01) 
                 => ServerBoundPacket::PingRequest(decoder.read_long()),
-            (NS::Login, 0) => {
+            (NS::Login, 0x00) => {
                 ServerBoundPacket::LoginStart(LoginStart::decode(decoder))
             },
-            (NS::Login, 2) => {
+            (NS::Login, 0x02) => {
                 let lpr = LoginPluginResponse::decode(decoder);
                 if lpr.id == -1 {
                     *state = NetworkState::Play;
                 }
                 ServerBoundPacket::LoginPluginResponse(lpr)
             },
-            (NS::Play, 4) => ServerBoundPacket::ChatCommand(ChatMessage::decode(decoder)),
-            (NS::Play, 5) => ServerBoundPacket::ChatMessage(ChatMessage::decode(decoder)),
-            (NS::Play, id @ (17 | 19 | 20 | 21 | 29)) => ServerBoundPacket::Ignored(id),
+            (NS::Play, 0x04) => ServerBoundPacket::ChatCommand(ChatMessage::decode(decoder)),
+            (NS::Play, 0x05) => ServerBoundPacket::ChatMessage(ChatMessage::decode(decoder)),
+            (NS::Play, 0x0C) => ServerBoundPacket::PluginMessage(SPluginMessage::decode(decoder)),
+            (NS::Play, id @ (0x11 | 0x13 | 0x14 | 0x15 | 0x1d)) => ServerBoundPacket::Ignored(id),
             (_, id) => ServerBoundPacket::Unknown(id),
         }
     }

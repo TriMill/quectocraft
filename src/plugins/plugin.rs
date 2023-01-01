@@ -9,6 +9,7 @@ pub struct EventHandlers<'lua> {
     pub player_leave: Option<Function<'lua>>,
     pub chat_message: Option<Function<'lua>>,
     pub command: Option<Function<'lua>>,
+    pub plugin_message: Option<Function<'lua>>,
 }   
 
 pub struct Plugin<'lua> {
@@ -33,8 +34,17 @@ impl <'lua> Plugin<'lua> {
         let player_leave: Option<Function<'lua>> = module.get("playerLeave").ok();
         let chat_message: Option<Function<'lua>> = module.get("chatMessage").ok();
         let command: Option<Function<'lua>> = module.get("command").ok();
+        let plugin_message: Option<Function<'lua>> = module.get("pluginMessage").ok();
 
-        let event_handlers = EventHandlers { init, register_commands, player_join, player_leave, chat_message, command };
+        let event_handlers = EventHandlers { 
+            init, 
+            register_commands, 
+            player_join, 
+            player_leave, 
+            chat_message, 
+            command,
+            plugin_message,
+        };
         Ok(Plugin { id, name, version, event_handlers })
     }
 }

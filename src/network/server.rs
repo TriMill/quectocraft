@@ -135,7 +135,17 @@ impl <'lua> NetworkServer<'lua> {
                         }
                     }
                 }
+            },
+            Response::PluginMessage { player, channel, data } => {
+                for client in self.clients.iter_mut() {
+                    if let Some(pl) = &client.player {
+                        if pl.name == player || pl.uuid.to_string() == player {
+                            client.send_packet(CPluginMessage { channel: channel.clone(), data: data.clone() })?;
+                        }
+                    }
+                }
             }
+,
         }
         Ok(())
     }
@@ -181,6 +191,9 @@ impl <'lua> NetworkServer<'lua> {
                     }
                 }
             }
+            ServerBoundPacket::PluginMessage(SPluginMessage { channel, data }) => {
+                self.plugins.plugin_message(client.player.as_ref().unwrap(), &channel, &data);
+            }
         }
         Ok(())
     }
@@ -193,10 +206,12 @@ impl <'lua> NetworkServer<'lua> {
             client.close();
             return Ok(())
         }
+
         client.player = Some(Player {
             name: login_start.name.clone(),
             uuid: login_start.uuid,
         });
+        
         match self.config.login {
             LoginMode::Offline => {
                 client.verified = true;
@@ -226,9 +241,11 @@ impl <'lua> NetworkServer<'lua> {
             client.close();
             return Ok(());
         };
+
         let (sig, data) = data.split_at(32);
         let mut mac = Hmac::<Sha256>::new_from_slice(self.config.velocity_secret.clone().unwrap().as_bytes())?;
         mac.update(data);
+
         if mac.verify_slice(sig).is_err() {
             client.send_packet(Disconnect { reason: json!({ 
                 "text": "Could not verify secret. Ensure that the secrets configured for Velocity and Quectocraft match."
@@ -236,15 +253,21 @@ impl <'lua> NetworkServer<'lua> {
             client.close();
             return Ok(())
         }
+
         client.verified = true;
+
         client.send_packet(LoginPluginRequest{ 
             id: -1, 
             channel: "qc:init".to_owned(), 
             data: Vec::new() 
         })?;
+
         Ok(())
     }
 
+    //
+    // Handle the end of "login" and beginning of "play"
+    //
     fn login(&mut self, client: &mut NetworkClient) -> std::io::Result<()> {
         if !client.verified {
             client.send_packet(Disconnect { reason: json!({
@@ -254,11 +277,14 @@ impl <'lua> NetworkServer<'lua> {
             client.close();
             return Ok(())
         }
+
         client.send_packet(LoginSuccess {
             name: client.player.as_ref().unwrap().name.to_owned(),
             uuid: client.player.as_ref().unwrap().uuid,
         })?;
+
         self.plugins.player_join(client.player.as_ref().unwrap());
+
         client.send_packet(LoginPlay {
             eid: client.id,
             is_hardcore: false,
@@ -280,7 +306,8 @@ impl <'lua> NetworkServer<'lua> {
             is_flat: false,
             death_location: None,
         })?;
-        client.send_packet(PluginMessage {
+
+        client.send_packet(CPluginMessage {
             channel: "minecraft:brand".to_owned(),
             data: {
                 let mut data = Vec::new();
@@ -288,7 +315,10 @@ impl <'lua> NetworkServer<'lua> {
                 data
             }
         })?;
+
         client.send_packet(self.commands.clone())?;
+
+        // Send 3x3 square of empty chunks.
         let mut chunk_data: Vec<u8> = Vec::new();
         for _ in 0..(384 / 16) {
             // number of non-air blocks
@@ -305,15 +335,21 @@ impl <'lua> NetworkServer<'lua> {
         let hmdata = vec![0i64; 37];
         let mut heightmap = nbt::Blob::new();
         heightmap.insert("MOTION_BLOCKING", hmdata).unwrap();
-        client.send_packet(ChunkData {
-            x: 0,
-            z: 0,
-            heightmap,
-            chunk_data,
-        })?;
+        for x in -1..=1 {
+            for z in -1..=1 {
+                client.send_packet(ChunkData {
+                    x,
+                    z,
+                    heightmap: heightmap.clone(),
+                    chunk_data: chunk_data.clone(),
+                })?;
+            }
+        }
+
         client.send_packet(SetDefaultSpawnPosition {
             pos: Position { x: 0, y: 0, z: 0 }, angle: 0.0
         })?;
+
         client.send_packet(SyncPlayerPosition {
             x: 0.0,
             y: 64.0,
@@ -324,8 +360,7 @@ impl <'lua> NetworkServer<'lua> {
             teleport_id: 0,
             dismount: false
         })?;
-        // TODO why doesn't this work with quilt?
-        // client.send_packet(ClientBoundPacket::PlayerAbilities(0x0f, 0.05, 0.1))?;
+
         Ok(())
     }
 

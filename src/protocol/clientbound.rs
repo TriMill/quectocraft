@@ -151,12 +151,12 @@ impl ClientBoundPacket for LoginPlay {
 }
 
 #[derive(Debug)]
-pub struct PluginMessage {
+pub struct CPluginMessage {
     pub channel: String,
     pub data: Vec<u8>,
 }
 
-impl ClientBoundPacket for PluginMessage {
+impl ClientBoundPacket for CPluginMessage {
     fn encode(&self, encoder: &mut impl PacketEncoder) {
         encoder.write_string(32767, &self.channel);
         encoder.write_bytes(&self.data);
